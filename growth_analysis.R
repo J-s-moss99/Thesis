@@ -174,7 +174,6 @@ res.mod2[['convergence']]
 
 resid.mod2 <- recaptures.rjc$ginc-growth.inc(recaptures.rjc$lrel,recaptures.rjc$tlib,res.mod2$par[1],res.mod2$par[2])
 
-
 qqnorm(resid.mod2)
 qqline(resid.mod2)
 
