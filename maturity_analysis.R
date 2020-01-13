@@ -3,6 +3,8 @@
 # load packages for plotting and date-time operations
 library(lattice)
 library(lubridate)
+library(broom)
+library(tidyverse)
 
 # load data
 
@@ -37,6 +39,20 @@ xyplot(mature~Length_cm|Sex,data=tagging_data.rjc)
 # binomial data
 
 mod.maturity.L   <- glm(mature ~ Length_cm, family=binomial(link="logit"),data=tagging_data.rjc)
+
+# quick diagnostics
+# check influential values
+plot(mod.maturity.L, which = 4, id.n = 3)
+# Extract model results
+model.data <- augment(mod.maturity.L) %>% mutate(index = 1:n()) 
+# display the data (top 3) with largest Cooks distance
+model.data %>% top_n(3, .cooksd)
+
+ggplot(model.data, aes(index, .std.resid)) + 
+  geom_point(aes(color = mature), alpha = .5) +
+  theme_bw()
+
+
 mod.maturity.S   <- glm(mature ~ Length_cm + as.character(Sex), family=binomial(link="logit"),data=tagging_data.rjc)
 mod.maturity.SL  <- glm(mature ~ Length_cm * as.character(Sex), family=binomial(link="logit"),data=tagging_data.rjc)
 
@@ -51,13 +67,13 @@ AIC(mod.maturity.L);AIC(mod.maturity.S);AIC(mod.maturity.SL) # second model (wit
 # compare predictions with observed values, in table
 
 tagging_data.rjc$pred.L <- as.numeric(predict(mod.maturity.L,newdata =tagging_data.rjc,type="response",se.fit = T)$fit >0.5)
-table(tagging_data.rjc$pred.L,tagging_data.rjc$mature,tagging_data.rjc$Sex)
+sum(table(tagging_data.rjc$pred.L,tagging_data.rjc$mature,tagging_data.rjc$Sex))
 
 tagging_data.rjc$pred.S <- as.numeric(predict(mod.maturity.S,newdata = tagging_data.rjc,type="response",se.fit = T)$fit >0.5)
-table(tagging_data.rjc$pred.S,tagging_data.rjc$mature,tagging_data.rjc$Sex)
+sum(table(tagging_data.rjc$pred.S,tagging_data.rjc$mature,tagging_data.rjc$Sex))
 
 tagging_data.rjc$pred.SL <- as.numeric(predict(mod.maturity.SL,newdata = tagging_data.rjc,type="response",se.fit = T)$fit >0.5)
-table(tagging_data.rjc$pred.SL,tagging_data.rjc$mature,tagging_data.rjc$Sex)
+sum(table(tagging_data.rjc$pred.SL,tagging_data.rjc$mature,tagging_data.rjc$Sex))
 
 # or create a ROC curve to compare the area under the curve
 library(pROC)
