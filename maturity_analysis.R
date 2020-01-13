@@ -34,7 +34,6 @@ tagging_data.rjc$mature[tagging_data.rjc$Maturity %in% c("A","B")] <- 0
 # some data exploration
 xyplot(mature~Length_cm|Sex,data=tagging_data.rjc)
 
-
 # fit models to data
 # binomial data
 
