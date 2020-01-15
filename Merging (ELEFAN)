@@ -1,0 +1,198 @@
+#-------------------------------------------------------------------#
+# load shape file of ICES divisions and subset to areas of interest #
+#-------------------------------------------------------------------#
+ICES_borders <- readOGR("ICES_areas/ICES_Areas_20160601_cut_dense_3857.shp")
+ICES_borders <- readOGR("ICES_areas/ICES_Areas_20160601_cut_dense_3857.shp")
+# transform the projection to lat-lon coordinates
+ICES_borders   <- spTransform(ICES_borders, CRS("+proj=longlat +datum=WGS84"))
+
+intersec       <- ICES_borders[ICES_borders$Area_Full %in% c("27.7.d","27.4.b","27.4.c","27.4.a","27.3.a.20"), ]
+plot(intersec)
+# southern and central north sea + eastern english channel
+ICES_borders   <- ICES_borders[ICES_borders$Area_Full %in% c("27.4.b","27.4.c","27.7.d"), ]
+
+
+
+#---------------------------------#
+# load SURVEY DATA                #
+#---------------------------------#
+#------------------------#
+#                        #
+#  Join BTS & IBTS data  #
+#                        #
+#------------------------#
+# load WORMS species list (allows to couple aphia id with scientific name)
+
+load("HL_BTS.RData")
+load("HH_BTS.RData")
+load("worms_species_list.RData")
+
+#
+# add scientific names
+HL_BTS  <-  left_join(HL_BTS,worms_species_list,by=c("Valid_Aphia"))
+# HL_IBTS <-  left_join(HL_IBTS,worms_species_list,by=c("Valid_Aphia"))
+
+# remove some unnecessary columns
+HL_BTS$DateofCalculation     <- NULL
+HH_BTS$DateofCalculation     <- NULL
+HL_BTS$RecordType            <- NULL
+HH_BTS$RecordType            <- NULL
+# HL_IBTS$DateofCalculation    <- NULL
+# HH_IBTS$DateofCalculation    <- NULL
+# HL_IBTS$RecordType           <- NULL
+# HH_IBTS$RecordType           <- NULL
+
+# remove points outside polygon of interest
+HH_BTS       <- SpatialPointsDataFrame(as.matrix(HH_BTS[,c("ShootLong","ShootLat")]),
+                                       data=HH_BTS,
+                                       proj4string = CRS("+proj=longlat +datum=WGS84"))
+
+# takes a while...
+HH_BTS     <- raster::intersect(HH_BTS,ICES_borders)
+
+
+# now you got the stations in your area
+# clean up the station data
+
+# small local backup
+HH_BTS.NS <- HH_BTS
+HH_BTS    <- HH_BTS.NS
+
+HH_BTS    <- as.data.frame(HH_BTS)
+
+head(HH_BTS)
+HH_BTS <- subset(HH_BTS,HaulVal=="V")
+HH_BTS <- subset(HH_BTS,HaulDur>14 & HaulDur<41)
+table(is.na(HH_BTS$HaulVal))
+table(is.na(HH_BTS$HaulDur))
+
+
+rows <- which(is.na(HH_BTS$Distance))
+length(rows)
+# calculate disctance on a sphere
+for(i in rows){
+  HH_BTS$Distance[i] <- distHaversine(c(HH_BTS$ShootLong[i] , HH_BTS$ShootLat[i]),
+                                      c(HH_BTS$HaulLong[i] , HH_BTS$HaulLat[i]),
+                                      r=6378137)
+}
+
+rem     <- which(is.na(HH_BTS$Distance) & is.na(HH_BTS$GroundSpeed))
+if(length(rem)>0){
+  HH_BTS  <- HH_BTS[-rem,]}
+
+#add beam with
+HH_BTS$BW <- ifelse(HH_BTS$Gear%in% c("BT4A","BT4AS","BT4AI"), 4,
+                    ifelse(HH_BTS$Gear=="BT4S", 4,
+                           ifelse(HH_BTS$Gear=="BT7", 7,
+                                  ifelse(HH_BTS$Gear=="BT8", 8, NA))))
+
+# some data exploration
+?hist
+hist(HH_BTS$Distance[is.na(HH_BTS$GroundSpeed)],breaks=200, xlim = range(0,10000))
+hist(HH_BTS$GroundSpeed[!is.na(HH_BTS$GroundSpeed)],breaks=200)
+min(HH_BTS$GroundSpeed[!is.na(HH_BTS$GroundSpeed)])
+
+HH_BTS$GroundSpeed[HH_BTS$GroundSpeed<3] <- NA
+
+HH_BTS$swept_area[!is.na(HH_BTS$GroundSpeed)] <- HH_BTS$GroundSpeed[!is.na(HH_BTS$GroundSpeed)] *1852*HH_BTS$HaulDur[!is.na(HH_BTS$GroundSpeed)] /60*HH_BTS$BW[!is.na(HH_BTS$GroundSpeed)] /1000000
+HH_BTS$swept_area[is.na(HH_BTS$GroundSpeed)]  <- HH_BTS$Distance[is.na(HH_BTS$GroundSpeed)] *HH_BTS$BW[is.na(HH_BTS$GroundSpeed)] /1000000
+table(is.na(HH_BTS$swept_area))
+hist(HH_BTS$Distance[is.na(HH_BTS$GroundSpeed)],breaks=200)
+hist(HH_BTS$swept_area)
+
+# here, I do some manual clean up of data I don't trust
+assumption <- which(HH_BTS$swept_area>0.05)
+HH_BTS[assumption,]
+summary(HH_BTS$GroundSpeed[HH_BTS$Country=="BEL"])
+HH_BTS$swept_area[assumption] <- 4 *1852*HH_BTS$HaulDur[assumption] /60*HH_BTS$BW[assumption] /1000000
+idx <- which(is.na(HH_BTS$swept_area))
+HH_BTS[idx,]
+
+hist(HH_BTS$swept_area)
+
+# extract the species/size of interest from the HL data
+# for you, this will be ray species
+
+table(HL_BTS$scientificname)
+
+# you can follow this workflow and change it to an elasmobranch
+
+
+### R. clavata
+
+Thorn <- subset(HL_BTS, scientificname == "Raja clavata")
+idx     <-  which(Thorn$LngtCode==".")                      # select the data with lengthcode in mm
+Thorn$LngtClass[idx]  <- Thorn$LngtClass[idx] * 10 # convert to cm
+hist(Thorn$LngtClass[idx])
+
+#### Merging datasets 
+
+myvars = c("LngtClass", "Year", "Ship")
+data <- Thorn[myvars]
+myvars2 =c("Ship", "Year", "Month", "Day")
+data2 = HH_BTS[myvars2]
+
+merge <- merge(data, data2, by=("Year")) ## attempt 1
+
+data3 = left_join(data, data2,  by=("Year")) ## attempt 2 
+
+## Both attempts are not working are increasing my numbers of obs by way to much 
+
+
+
+# create an empty list
+
+Elefan_rjc <- list()
+
+
+
+
+# loop over all the data
+for( i in 1:nrow(Thorn)){
+  # create a dataframe per observation
+  
+  df.record <- data.frame(
+    
+    Length = rep(Thorn$LngtClass[i],Thorn$HLNoAtLngt[i]),
+    
+    Year =  rep(Thorn$Year[i],Thorn$HLNoAtLngt[i]),
+    
+    Month = rep(Thorn$Month[i],Thorn$HLNoAtLngt[i]),
+    
+    Date = rep(Thorn$Date[i],Thorn$HLNoAtLngt[i]))
+  
+  # add it in the list
+  
+  Elefan_rjc[[i]] <- df.record
+  
+}
+# put all the list items together
+Elefan_df <- do.call(rbind,Elefan_rjc)
+
+#### ELEFAN analysis
+
+
+library(readr)
+lfd <- read_csv("CSVs/lqf.csv", col_types = cols(LngtClass = col_number(), 
+                                                 + Year = col_date(format = "%m/%d/%Y")))
+# create lfq data
+lfq_dat <- lfqCreate(lqf,Lname = "LngtClass", Dname = "Year", aggregate_dates = TRUE,
+                     length_unit = "mm", bin_size = 0.5, plot=TRUE, plus_group=c(TRUE,15.75)) ###
+
+
+# plot raw and restructured LFQ data
+?lfqRestructure()
+lfqbin <- lfqRestructure(lfq_dat, MA = 5, addl.sqrt = FALSE)
+opar <- par(mfrow = c(2,1), mar = c(2,5,2,3), oma = c(2,0,0,0))
+plot(lfqbin, Fname = "catch", date.axis = "modern")
+plot(lfqbin, Fname = "rcounts", date.axis = "modern")
+par(opar)
+
+# Powell Wetherall plot
+res_PW <- powell_wetherall(param = lfq_dat,
+                           catch_columns = 1:ncol(lfq_dat$catch),
+                           reg_int = c(10,28))
+# show results
+paste("Linf =",round(res_PW$Linf_est), "±", round(res_PW$se_Linf))
+
+
